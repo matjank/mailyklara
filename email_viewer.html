@@ -24,19 +24,25 @@
     .speaker-jakub { border-left: 5px solid #d97706; background-color: #fffbeb; }
     .speaker-zdenek { border-left: 5px solid #4b5563; background-color: #f9fafb; }
     .speaker-other { border-left: 5px solid #64748b; background-color: #f8fafc; }
+    .card-hidden-dimmed {
+      opacity: 0.45;
+      border-style: dashed !important;
+      background-color: #f1f5f9 !important;
+      filter: grayscale(40%);
+    }
   </style>
 </head>
 <body class="min-h-screen p-4 md:p-8 bg-[#f8fafc] text-[#0f172a]">
   <div class="max-w-5xl mx-auto space-y-6">
     <!-- Header -->
-    <header class="bg-white border border-slate-300 rounded-2xl p-6 shadow-sm">
+    <header class="bg-white border border-slate-300 rounded-2xl p-6 shadow-sm space-y-4">
       <div class="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 class="text-2xl font-bold text-slate-900 flex items-center gap-2">
             💬 Chronologický e-mailový dialog
           </h1>
           <p class="text-sm text-slate-600 mt-1">
-            Plná časová osa konverzace sjednocená z <code class="bg-slate-100 px-1 py-0.5 rounded text-xs">messages.csv</code> i <code class="bg-slate-100 px-1 py-0.5 rounded text-xs">messages2.csv</code>.
+            Plná časová osa konverzace sjednocená z <code class="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">messages.csv</code> i <code class="bg-slate-100 px-1 py-0.5 rounded text-xs font-mono">messages2.csv</code>.
           </p>
         </div>
         <div class="flex items-center gap-2">
@@ -47,7 +53,7 @@
       </div>
 
       <!-- Controls & Search -->
-      <div class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-3">
+      <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-12 gap-3">
         <div class="md:col-span-5">
           <input
             id="searchInput"
@@ -70,6 +76,34 @@
           <button id="sortBtn" class="w-full px-3 py-2.5 rounded-xl border border-slate-300 bg-slate-50 text-slate-800 text-xs font-semibold hover:bg-slate-100 transition flex items-center justify-center gap-1 shadow-sm">
             <span id="sortLabel">Od nejstarších ⬆</span>
           </button>
+        </div>
+      </div>
+
+      <!-- Persistent Hidden Messages Panel -->
+      <div class="pt-3 border-t border-slate-200 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 text-xs bg-slate-50/70 p-3 rounded-xl border">
+        <div class="flex flex-wrap items-center gap-2 w-full md:w-auto">
+          <span class="font-bold text-slate-700 flex items-center gap-1">
+            🙈 Skryté zprávy (<span id="hiddenCount" class="text-sky-700 font-bold">0</span>):
+          </span>
+          <input
+            id="hiddenIdsInput"
+            type="text"
+            placeholder="ID oddělená čárkou (např. 5, 12, 45)..."
+            class="flex-1 md:w-80 px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-800 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-sky-500"
+            title="Seznam ID skrytých zpráv. Můžete sem přímo vložit čísla oddělená čárkou a stisknout Enter."
+          />
+          <button id="copyHiddenBtn" class="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 font-medium transition shadow-xs flex items-center gap-1">
+            📋 Kopírovat ID
+          </button>
+          <button id="clearHiddenBtn" class="px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 font-medium transition shadow-xs">
+            ✕ Obnovit vše
+          </button>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-1.5 cursor-pointer select-none font-medium text-slate-700 hover:text-slate-900">
+            <input type="checkbox" id="showHiddenToggle" class="rounded border-slate-300 text-sky-600 focus:ring-sky-500 w-4 h-4 cursor-pointer" />
+            <span>Zobrazovat skryté zprávy (šedě)</span>
+          </label>
         </div>
       </div>
     </header>
@@ -15511,9 +15545,22 @@
     }
 ];
     
+    // Persistent Hidden IDs using localStorage
+    const STORAGE_KEY = 'mailyklara_hidden_message_ids';
+    let hiddenIds = new Set();
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        JSON.parse(saved).forEach(id => hiddenIds.add(Number(id)));
+      }
+    } catch (e) {
+      console.warn("Could not load hidden IDs from localStorage", e);
+    }
+
     let isAscending = true;
     let currentSpeakerFilter = "ALL";
     let currentYearFilter = "ALL";
+    let showHiddenMode = false;
     let searchQuery = "";
     let displayedCount = 50;
     const PAGE_SIZE = 50;
@@ -15526,6 +15573,26 @@
     const sortLabel = document.getElementById("sortLabel");
     const statCount = document.getElementById("stat-count");
     const loadMoreBtn = document.getElementById("loadMoreBtn");
+    const hiddenCount = document.getElementById("hiddenCount");
+    const hiddenIdsInput = document.getElementById("hiddenIdsInput");
+    const copyHiddenBtn = document.getElementById("copyHiddenBtn");
+    const clearHiddenBtn = document.getElementById("clearHiddenBtn");
+    const showHiddenToggle = document.getElementById("showHiddenToggle");
+
+    function saveHiddenIds() {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.from(hiddenIds)));
+      } catch (e) {}
+      updateHiddenInputDisplay();
+    }
+
+    function updateHiddenInputDisplay() {
+      const sortedIds = Array.from(hiddenIds).sort((a,b) => a - b);
+      hiddenCount.textContent = sortedIds.length;
+      if (document.activeElement !== hiddenIdsInput) {
+        hiddenIdsInput.value = sortedIds.join(', ');
+      }
+    }
 
     // Populate Filters Dynamically
     const speakerCounts = {};
@@ -15592,6 +15659,10 @@
 
     function getFilteredMessages() {
       return RAW_MESSAGES.filter(m => {
+        const isHidden = hiddenIds.has(m.Id);
+        if (isHidden && !showHiddenMode) {
+          return false;
+        }
         if (currentSpeakerFilter !== "ALL" && m.Speaker !== currentSpeakerFilter) {
           return false;
         }
@@ -15609,7 +15680,19 @@
       });
     }
 
+    function toggleHideMessage(id) {
+      if (hiddenIds.has(id)) {
+        hiddenIds.delete(id);
+      } else {
+        hiddenIds.add(id);
+      }
+      saveHiddenIds();
+      render();
+    }
+
     function render() {
+      updateHiddenInputDisplay();
+
       const filtered = getFilteredMessages();
       const sorted = [...filtered].sort((a, b) => {
         const da = a.DateTimeIso || "";
@@ -15633,9 +15716,10 @@
       }
 
       visible.forEach(m => {
+        const isHidden = hiddenIds.has(m.Id);
         const card = document.createElement("article");
         const style = getSpeakerStyle(m.Speaker);
-        card.className = `border border-slate-300 rounded-xl p-5 shadow-sm space-y-3 hover:border-slate-400 transition ${style.cardClass}`;
+        card.className = `border border-slate-300 rounded-xl p-5 shadow-sm space-y-3 transition ${style.cardClass} ${isHidden ? 'card-hidden-dimmed' : 'hover:border-slate-400'}`;
 
         const formattedDate = formatDate(m.Date, m.Time);
         const safeText = makeLinksClickable(escapeHtml(m.Text).replace(/\n/g, "<br>"));
@@ -15649,8 +15733,24 @@
               </span>
               <span class="font-bold text-sm text-slate-900">${formattedDate}</span>
               <span class="text-xs text-slate-500 font-mono">#${m.Id}</span>
+              ${isHidden ? `<span class="badge bg-rose-100 text-rose-800 border border-rose-300">🚫 Skryto</span>` : ''}
+              ${hasSubject ? `<span class="badge bg-slate-100 text-slate-700 border border-slate-200 font-medium">${escapeHtml(m.Subject)}</span>` : ''}
             </div>
-            ${hasSubject ? `<span class="badge bg-slate-100 text-slate-700 border border-slate-200 font-medium">${escapeHtml(m.Subject)}</span>` : ''}
+
+            <div class="flex items-center gap-2">
+              <button
+                type="button"
+                data-id="${m.Id}"
+                class="hide-toggle-btn text-xs font-semibold px-2.5 py-1 rounded-lg border transition flex items-center gap-1.5 cursor-pointer ${
+                  isHidden
+                    ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
+                    : 'bg-slate-100 text-slate-600 border-slate-300 hover:bg-rose-50 hover:text-rose-700 hover:border-rose-300'
+                }"
+                title="${isHidden ? 'Znovu zobrazit zprávu' : 'Skrýt tuto zprávu'}"
+              >
+                ${isHidden ? '👁️ Obnovit' : '🙈 Skrýt'}
+              </button>
+            </div>
           </div>
 
           <div class="text-sm leading-relaxed whitespace-pre-wrap break-words text-slate-900 font-normal">
@@ -15660,6 +15760,14 @@
         listEl.appendChild(card);
       });
 
+      // Attach click events for hide buttons
+      document.querySelectorAll(".hide-toggle-btn").forEach(btn => {
+        btn.addEventListener("click", (e) => {
+          const id = Number(e.currentTarget.getAttribute("data-id"));
+          toggleHideMessage(id);
+        });
+      });
+
       if (sorted.length > displayedCount) {
         loadMoreBtn.classList.remove("hidden");
       } else {
@@ -15667,6 +15775,7 @@
       }
     }
 
+    // Event listeners
     searchInput.addEventListener("input", (e) => {
       searchQuery = e.target.value.trim();
       displayedCount = PAGE_SIZE;
@@ -15696,6 +15805,50 @@
       render();
     });
 
+    showHiddenToggle.addEventListener("change", (e) => {
+      showHiddenMode = e.target.checked;
+      render();
+    });
+
+    clearHiddenBtn.addEventListener("click", () => {
+      if (hiddenIds.size === 0) return;
+      if (confirm(`Opravdu chcete obnovit všech ${hiddenIds.size} skrytých zpráv?`)) {
+        hiddenIds.clear();
+        saveHiddenIds();
+        render();
+      }
+    });
+
+    copyHiddenBtn.addEventListener("click", () => {
+      const text = Array.from(hiddenIds).sort((a,b)=>a-b).join(', ');
+      if (!text) {
+        alert("Zatím nejsou skryty žádné zprávy.");
+        return;
+      }
+      navigator.clipboard.writeText(text).then(() => {
+        const orig = copyHiddenBtn.textContent;
+        copyHiddenBtn.textContent = "✓ Zkopírováno!";
+        setTimeout(() => copyHiddenBtn.textContent = orig, 1500);
+      });
+    });
+
+    hiddenIdsInput.addEventListener("change", (e) => {
+      const val = e.target.value.trim();
+      const newSet = new Set();
+      if (val) {
+        val.split(/[,;\s]+/).forEach(token => {
+          const num = parseInt(token, 10);
+          if (!isNaN(num) && num > 0) {
+            newSet.add(num);
+          }
+        });
+      }
+      hiddenIds = newSet;
+      saveHiddenIds();
+      render();
+    });
+
+    // Initial render
     render();
   </script>
 </body>
